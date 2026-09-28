@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#8a5bd1" />
+    <title>DEFEAT PIGGY MASTER!</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="game-wrap">
+      <header>
+        <div>
+          <p class="eyebrow">Sara's game</p>
+          <h1>DEFEAT PIGGY MASTER!</h1>
+        </div>
+        <div class="header-tools">
+          <div class="stats" aria-label="Game information">
+            <div><span>Score</span><strong id="score">0</strong></div>
+            <div><span>Level</span><strong id="level">1</strong></div>
+            <div><span>Piggy Master</span><strong id="boss-timer">20s</strong></div>
+            <div><span>Bonus</span><strong id="bonus-status">—</strong></div>
+          </div>
+          <button class="sound-toggle" id="sound-toggle" type="button" aria-pressed="false">🔊 Sound On</button>
+        </div>
+      </header>
+
+      <section class="game-frame" id="game-frame">
+        <canvas id="game" width="960" height="600" aria-label="Platy game area"></canvas>
+        <div class="notice" id="notice" aria-live="polite"></div>
+
+        <div class="screen show" id="screen">
+          <div class="screen-card">
+            <p class="screen-kicker" id="screen-kicker">A bouncy adventure</p>
+            <h2 id="screen-title">DEFEAT PIGGY MASTER</h2>
+            <p id="screen-message">
+              Platy travels along the path automatically. Turn with the left and right arrows,
+              press the up arrow to jump, and scoop up stuffies from the trail with her tail!
+            </p>
+            <div class="screen-actions">
+              <button id="screen-button" type="button">Start Game</button>
+              <button class="paper-button" id="instructions-button" type="button" aria-label="Open game instructions">
+                <span aria-hidden="true">📄</span> Instructions
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="help">
+        <div><span class="key">←</span><span class="key">→</span> Turn</div>
+        <div><span class="key">↑</span> Jump</div>
+        <div><span class="big-dot"></span> Big stuffy = 1 point</div>
+        <div><span class="small-dot"></span> Small stuffy = 5 points</div>
+        <div>🍎 Steer around fruit! Touching it = −2 points</div>
+        <div>🧲 Jump for rare bonuses</div>
+      </section>
+
+      <section class="touch-controls" aria-label="Touch controls">
+        <button data-key="ArrowUp" aria-label="Jump">▲ Jump</button>
+        <button data-key="ArrowLeft" aria-label="Move left">◀</button>
+        <button data-key="ArrowRight" aria-label="Move right">▶</button>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
