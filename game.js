@@ -4,24 +4,42 @@ const canvas = document.querySelector("#game");
 const ctx = canvas.getContext("2d");
 const frame = document.querySelector("#game-frame");
 const scoreText = document.querySelector("#score");
+const coinsText = document.querySelector("#coins");
 const levelText = document.querySelector("#level");
 const timerText = document.querySelector("#boss-timer");
 const bonusStatusText = document.querySelector("#bonus-status");
 const notice = document.querySelector("#notice");
 const screen = document.querySelector("#screen");
+const screenCard = document.querySelector(".screen-card");
 const screenKicker = document.querySelector("#screen-kicker");
 const screenTitle = document.querySelector("#screen-title");
 const screenMessage = document.querySelector("#screen-message");
 const screenButton = document.querySelector("#screen-button");
 const instructionsButton = document.querySelector("#instructions-button");
+const stableButton = document.querySelector("#stable-button");
+const customizeButton = document.querySelector("#customize-button");
+const homeButton = document.querySelector("#home-button");
+const stablePanel = document.querySelector("#stable-panel");
+const shopPanel = document.querySelector("#shop-panel");
+const customizePanel = document.querySelector("#customize-panel");
+const accountPanel = document.querySelector("#account-panel");
+const accountList = document.querySelector("#account-list");
 const soundToggle = document.querySelector("#sound-toggle");
 
 const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 const PLAY_TOP = 78;
 const keys = new Set();
-const sprites = new Image();
-sprites.src = "assets/game-sprites.png";
+const spriteFiles = [
+  "platy", "piggy-master", "deer", "pink-pig",
+  "white-dog", "dalmatian", "black-dog", "tiny-pig",
+  "orange", "apple", "pear", "banana",
+];
+const spriteImages = spriteFiles.map((fileName) => {
+  const image = new Image();
+  image.src = `assets/sprites/${fileName}.png`;
+  return image;
+});
 const platyBack = new Image();
 platyBack.src = "assets/platy-back.png";
 const platyTailAnimation = new Image();
@@ -30,6 +48,146 @@ const bonusIcons = new Image();
 bonusIcons.src = "assets/bonus-icons.png";
 const megaTailIcon = new Image();
 megaTailIcon.src = "assets/mega-tail-power.png";
+const flyingPets = new Image();
+flyingPets.src = "assets/flying-pets.png";
+const platyRidingPets = new Image();
+platyRidingPets.src = "assets/platy-riding-pets.png";
+
+const SAVE_KEY = "defeat-piggy-master-save-v1";
+const ACCOUNTS_KEY = "defeat-piggy-master-accounts-v1";
+const ACCOUNT_RESET_KEY = "defeat-piggy-master-accounts-cleared-2026-09-29";
+const PET_FIND_CHANCE = 0.4;
+const MAX_UNCARED_ROUNDS = 3;
+const PET_NAMES = [
+  "Sparky", "Sizzle", "Rosie", "Pinky", "Princess", "Solor", "Ruby",
+  "Topaz", "Saffire", "Diamond", "Stormy", "Teddy",
+];
+const PET_NAME_STARTS = ["Moon", "Star", "Sun", "Fire", "Rain", "Dream", "Snow", "Berry"];
+const PET_NAME_ENDS = ["beam", "spark", "shine", "drop", "song", "bell", "heart", "gem"];
+
+function chooseNewPetName(pets, randomChoice = true) {
+  const usedNames = new Set(pets.map((pet) => pet.name).filter(Boolean));
+  const originalNames = PET_NAMES.filter((name) => !usedNames.has(name));
+  if (originalNames.length > 0) {
+    return randomChoice
+      ? originalNames[Math.floor(Math.random() * originalNames.length)]
+      : originalNames[0];
+  }
+
+  const madeUpNames = [];
+  PET_NAME_STARTS.forEach((start) => {
+    PET_NAME_ENDS.forEach((end) => {
+      const name = `${start}${end}`;
+      if (!usedNames.has(name)) madeUpNames.push(name);
+    });
+  });
+  if (madeUpNames.length > 0) {
+    return randomChoice
+      ? madeUpNames[Math.floor(Math.random() * madeUpNames.length)]
+      : madeUpNames[0];
+  }
+  return `Wonderpet ${pets.length + 1}`;
+}
+
+function defaultPlayerData() {
+  return {
+    level: 1,
+    coins: 0,
+    stalls: 3,
+    pets: [],
+    selectedPetId: null,
+    inventory: { unicornFood: 0, dragonFood: 0, water: 0, soap: 0 },
+    customization: { color: "rainbow", hat: "none", trail: "none" },
+  };
+}
+
+function normalizePlayerData(saved) {
+  return {
+    ...defaultPlayerData(),
+    ...(saved || {}),
+    level: Math.max(1, Number(saved?.level) || 1),
+    pets: Array.isArray(saved?.pets) ? saved.pets : [],
+    inventory: { ...defaultPlayerData().inventory, ...(saved?.inventory || {}) },
+    customization: { ...defaultPlayerData().customization, ...(saved?.customization || {}) },
+  };
+}
+
+function clearExistingAccountsOnce() {
+  try {
+    if (localStorage.getItem(ACCOUNT_RESET_KEY) === "yes") return;
+    localStorage.removeItem(ACCOUNTS_KEY);
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.setItem(ACCOUNT_RESET_KEY, "yes");
+  } catch {
+    // The game still opens if browser storage is unavailable.
+  }
+}
+
+function loadAccountStore() {
+  try {
+    const savedStore = JSON.parse(localStorage.getItem(ACCOUNTS_KEY));
+    if (savedStore && Array.isArray(savedStore.accounts)) {
+      const accounts = savedStore.accounts.map((account, index) => ({
+        id: String(account.id || `account-${index + 1}`),
+        name: String(account.name || `Player ${index + 1}`).slice(0, 20),
+        data: normalizePlayerData(account.data),
+      }));
+      const activeAccountId = accounts.some((account) => account.id === savedStore.activeAccountId)
+        ? savedStore.activeAccountId
+        : accounts[0]?.id || null;
+      return { activeAccountId, accounts };
+    }
+
+  } catch {
+    // A fresh account list is used if browser storage is unavailable or damaged.
+  }
+  return { activeAccountId: null, accounts: [] };
+}
+
+clearExistingAccountsOnce();
+const accountStore = loadAccountStore();
+let playerData = accountStore.accounts.find((account) => account.id === accountStore.activeAccountId)?.data || defaultPlayerData();
+playerData.pets.forEach((pet, index) => {
+  if (!Number.isFinite(pet.colorHue)) pet.colorHue = (index * 67) % 360;
+  if (!pet.name) pet.name = chooseNewPetName(playerData.pets, false);
+  if (!Number.isFinite(pet.uncaredRounds)) pet.uncaredRounds = 0;
+  if (!Number.isFinite(pet.levelsUntilNeed)) pet.levelsUntilNeed = 1;
+  else pet.levelsUntilNeed = Math.min(2, Math.max(1, pet.levelsUntilNeed));
+});
+
+function savePlayerData() {
+  playerData.level = Math.max(1, level);
+  const account = accountStore.accounts.find((candidate) => candidate.id === accountStore.activeAccountId);
+  if (account) account.data = playerData;
+  try {
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accountStore));
+  } catch {
+    // The game still works if a browser has saving turned off.
+  }
+  coinsText.textContent = playerData.coins;
+}
+
+function selectedPet() {
+  return playerData.pets.find((pet) => pet.id === playerData.selectedPetId) || null;
+}
+
+function selectNextPet(previousPetId) {
+  if (playerData.pets.length === 0) {
+    playerData.selectedPetId = null;
+    return;
+  }
+  if (playerData.pets.length === 1) {
+    playerData.selectedPetId = playerData.pets[0].id;
+    return;
+  }
+  const previousIndex = playerData.pets.findIndex((pet) => pet.id === previousPetId);
+  const nextIndex = previousIndex < 0 ? 0 : (previousIndex + 1) % playerData.pets.length;
+  playerData.selectedPetId = playerData.pets[nextIndex].id;
+}
+
+function openStallCount() {
+  return Math.max(0, playerData.stalls - playerData.pets.length);
+}
 
 const SPRITE = {
   platy: 0,
@@ -46,6 +204,31 @@ const SPRITE = {
   banana: 11,
 };
 
+const CUSTOM_CHOICES = {
+  color: [
+    { id: "rainbow", name: "Rainbow", icon: "🌈", unlock: 1, filter: "none" },
+    { id: "pink", name: "Rosy Pink", icon: "🌸", unlock: 2, filter: "hue-rotate(300deg) saturate(1.3)" },
+    { id: "ocean", name: "Ocean Blue", icon: "🌊", unlock: 3, filter: "hue-rotate(125deg) saturate(1.25)" },
+    { id: "golden", name: "Golden", icon: "☀️", unlock: 4, filter: "sepia(.65) saturate(1.7) hue-rotate(350deg)" },
+  ],
+  hat: [
+    { id: "none", name: "No Hat", icon: "✓", unlock: 1 },
+    { id: "crown", name: "Crown", icon: "👑", unlock: 2 },
+    { id: "flower", name: "Flower", icon: "🌺", unlock: 3 },
+    { id: "wizard", name: "Wizard Hat", icon: "🧙", unlock: 4 },
+  ],
+  trail: [
+    { id: "none", name: "No Trail", icon: "✓", unlock: 1 },
+    { id: "sparkles", name: "Sparkles", icon: "✨", unlock: 2 },
+    { id: "rainbow", name: "Rainbow", icon: "🌈", unlock: 3 },
+    { id: "stars", name: "Stars", icon: "⭐", unlock: 4 },
+  ],
+};
+
+function platyColorFilter() {
+  return CUSTOM_CHOICES.color.find((choice) => choice.id === playerData.customization.color)?.filter || "none";
+}
+
 const SETTINGS = [
   { name: "Wildflower Meadow", top: "#aee9ff", ground: "#68bd68", accent: "#ffef78", kind: "meadow", trail: "#b78b5d" },
   { name: "Deep Forest", top: "#93d7c1", ground: "#28734b", accent: "#d6ff8b", kind: "forest", trail: "#8d6848" },
@@ -59,7 +242,7 @@ const SETTINGS = [
 
 let state = "title";
 let score = 0;
-let level = 1;
+let level = playerData.level;
 let settingIndex = -1;
 let setting = SETTINGS[0];
 let lastTime = 0;
@@ -76,12 +259,104 @@ let bonusSpawnTimer = 10;
 let magnetFlashTimer = 0;
 let invisibleTimer = 0;
 let megaTailTimer = 0;
-let lastBonusType = "invisible";
+let lastBonusType = null;
 let powersEnabledThisLevel = true;
-let guaranteedMegaTailPending = false;
+let skyTime = 0;
+let skyBoost = 0;
+let skyClouds = [];
+let cloudChecks = 0;
+let petFoundThisLevel = false;
+let skyDoor = null;
+let skyDoorDelay = 0;
+let lastUpTap = 0;
+let shopPurchases = 0;
+let coinsEarnedThisLevel = 0;
+let stableReturnAction = null;
 const HORIZON = 105;
 const PATH_NEAR_WIDTH = 690;
 const PATH_FAR_WIDTH = 105;
+
+function preparePetData() {
+  playerData.pets.forEach((pet, index) => {
+    if (!Number.isFinite(pet.colorHue)) pet.colorHue = (index * 67) % 360;
+    if (!pet.name) pet.name = chooseNewPetName(playerData.pets, false);
+    if (!Number.isFinite(pet.uncaredRounds)) pet.uncaredRounds = 0;
+    if (!Number.isFinite(pet.levelsUntilNeed)) pet.levelsUntilNeed = 1;
+    else pet.levelsUntilNeed = Math.min(2, Math.max(1, pet.levelsUntilNeed));
+  });
+}
+
+function renderAccountMenu() {
+  accountList.replaceChildren();
+  accountStore.accounts.forEach((account) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `account-choice${account.id === accountStore.activeAccountId ? " active" : ""}`;
+    button.setAttribute("aria-pressed", String(account.id === accountStore.activeAccountId));
+    button.title = `Play as ${account.name}`;
+    const circle = document.createElement("span");
+    circle.className = "account-circle";
+    circle.textContent = account.name.charAt(0).toUpperCase();
+    const name = document.createElement("span");
+    name.className = "account-name";
+    name.textContent = account.name;
+    button.append(circle, name);
+    button.addEventListener("click", () => switchAccount(account.id));
+    accountList.append(button);
+  });
+
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "account-choice add-account";
+  addButton.title = "Make a new game account";
+  addButton.innerHTML = '<span class="account-circle" aria-hidden="true">+</span><span class="account-name">New</span>';
+  addButton.addEventListener("click", createAccount);
+  accountList.append(addButton);
+}
+
+function switchAccount(accountId) {
+  if (accountId === accountStore.activeAccountId) return;
+  savePlayerData();
+  const account = accountStore.accounts.find((candidate) => candidate.id === accountId);
+  if (!account) return;
+  accountStore.activeAccountId = account.id;
+  playerData = normalizePlayerData(account.data);
+  preparePetData();
+  level = playerData.level;
+  score = 0;
+  scoreText.textContent = score;
+  levelText.textContent = level;
+  savePlayerData();
+  showHomeScreen();
+  showNotice(`Playing as ${account.name}`, "ready", 1800);
+}
+
+function createAccount() {
+  const enteredName = window.prompt("What is the player's name?");
+  if (enteredName === null) return false;
+  const name = enteredName.trim().slice(0, 20);
+  if (!name) {
+    showNotice("Please enter a name for the new account.", "danger", 2500);
+    return false;
+  }
+  savePlayerData();
+  const account = {
+    id: `account-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+    name,
+    data: defaultPlayerData(),
+  };
+  accountStore.accounts.push(account);
+  accountStore.activeAccountId = account.id;
+  playerData = account.data;
+  level = 1;
+  score = 0;
+  scoreText.textContent = score;
+  levelText.textContent = level;
+  savePlayerData();
+  showHomeScreen();
+  showNotice(`${name}'s game account is ready!`, "ready", 2200);
+  return true;
+}
 
 class GameAudio {
   constructor() {
@@ -186,6 +461,12 @@ class GameAudio {
     [440, 554, 659, 880, 1108].forEach((note, index) => this.tone(note, 0.14, "triangle", 0.07, index * 0.075));
   }
 
+  purchaseDing() {
+    // One bright bell note for a successful purchase.
+    this.tone(1568, 0.48, "sine", 0.09, 0, 1760);
+    this.tone(2352, 0.36, "triangle", 0.035, 0.025, 2520);
+  }
+
   win() {
     const fanfare = [
       [392, 0, 0.32], [523, 0.24, 0.32], [659, 0.48, 0.42],
@@ -260,9 +541,33 @@ let toys = [];
 let fruits = [];
 let tailCollections = [];
 let groundCracks = [];
+let runningCoins = [];
+let runningCoinTimer = 5;
+let skyCoins = [];
+let skyCoinTimer = 3;
 
 function random(min, max) {
   return min + Math.random() * (max - min);
+}
+
+function difficultyStep() {
+  return Math.max(0, level - 1);
+}
+
+function trailSpeedForLevel() {
+  return 86 + 90 * (1 - Math.exp(-difficultyStep() / 25));
+}
+
+function fruitSpeedForLevel() {
+  return trailSpeedForLevel() + 45 * (1 - Math.exp(-difficultyStep() / 18));
+}
+
+function bossIntervalForLevel() {
+  return 9 + 11 * Math.exp(-difficultyStep() / 16);
+}
+
+function platyReadySizeForLevel() {
+  return 59 + 12 * (1 - Math.exp(-difficultyStep() / 18));
 }
 
 function distance(a, b) {
@@ -307,6 +612,17 @@ function positionOnPath(y, sidePadding = 65) {
   };
 }
 
+function resetPowersForLevel() {
+  currentBonus = null;
+  magnetFlashTimer = 0;
+  invisibleTimer = 0;
+  megaTailTimer = 0;
+  lastBonusType = null;
+  powersEnabledThisLevel = Math.random() < 0.72;
+  bonusSpawnTimer = powersEnabledThisLevel ? random(18, 30) : Number.POSITIVE_INFINITY;
+  bonusStatusText.textContent = "—";
+}
+
 function buildLevel() {
   chooseSetting();
   pathDistance = random(0, 2000);
@@ -316,20 +632,16 @@ function buildLevel() {
   player.jumpClock = 0;
   player.jumpHeight = 0;
   player.jumpVelocity = 0;
-  bossTimer = 20;
+  bossTimer = bossIntervalForLevel();
   bossTarget = null;
   readyMessageShown = false;
   fruitHitCooldown = 0;
   outcomeTimer = 0;
-  currentBonus = null;
-  powersEnabledThisLevel = Math.random() < 0.72;
-  bonusSpawnTimer = powersEnabledThisLevel ? random(18, 30) : Number.POSITIVE_INFINITY;
-  magnetFlashTimer = 0;
-  invisibleTimer = 0;
-  megaTailTimer = 0;
-  bonusStatusText.textContent = "—";
+  resetPowersForLevel();
   tailCollections = [];
   groundCracks = [];
+  runningCoins = [];
+  runningCoinTimer = random(4, 8);
 
   const toyKinds = [SPRITE.deer, SPRITE.pinkPig, SPRITE.whiteDog, SPRITE.dalmatian, SPRITE.blackDog, SPRITE.tinyPig];
   const startingKinds = [Math.floor(random(0, 3)), 3 + Math.floor(random(0, 3)), Math.floor(random(0, 6))];
@@ -344,7 +656,7 @@ function buildLevel() {
       small,
       points: small ? 5 : 1,
       radius: small ? 20 : 31,
-      speed: (small ? 78 : 30) + level * (small ? 3 : 1),
+      speed: (small ? 81 : 31) + difficultyStep() * (small ? 3 : 1),
       vx: Math.cos(angle),
       vy: Math.sin(angle),
       caught: 0,
@@ -353,25 +665,49 @@ function buildLevel() {
   });
 
   const fruitSprites = [SPRITE.orange, SPRITE.apple, SPRITE.pear, SPRITE.banana];
-  fruits = fruitSprites.map((sprite, index) => ({
-    ...positionOnPath(105 + index * 125, 70),
-    sprite,
-    radius: index === 3 ? 36 : 33,
-  }));
+  const fruitCount = Math.min(8, 4 + Math.floor(difficultyStep() / 2));
+  fruits = Array.from({ length: fruitCount }, (_, index) => {
+    const sprite = fruitSprites[index % fruitSprites.length];
+    return {
+      ...positionOnPath(105 + index * 105, 70),
+      sprite,
+      radius: (sprite === SPRITE.banana ? 36 : 33) + Math.min(6, difficultyStep() * 0.3),
+    };
+  });
 
   levelText.textContent = level;
-  timerText.textContent = "20s";
+  timerText.textContent = `${Math.ceil(bossIntervalForLevel())}s`;
   showNotice(`${setting.name} — Level ${level}`, "", 2300);
 }
 
 function startNewGame() {
+  if (!accountStore.activeAccountId) {
+    createAccount();
+    return;
+  }
+  const flyer = selectedPet();
+  if (playerData.pets.length > 0 && (!flyer || flyer.need)) {
+    showStable(showHomeScreen);
+    screenMessage.textContent = flyer?.need
+      ? `Your selected pet is ${flyer.need}. Care for it before starting.`
+      : "Choose a pet before starting.";
+    return;
+  }
   score = 0;
-  level = 1;
+  level = playerData.level;
   scoreText.textContent = score;
   buildLevel();
-  guaranteedMegaTailPending = true;
-  powersEnabledThisLevel = true;
-  bonusSpawnTimer = random(6, 10);
+  hideScreen();
+  state = "playing";
+  lastTime = performance.now();
+  audio.startMusic();
+}
+
+function retryCurrentLevel() {
+  score = 0;
+  level = playerData.level;
+  scoreText.textContent = score;
+  buildLevel();
   hideScreen();
   state = "playing";
   lastTime = performance.now();
@@ -379,45 +715,292 @@ function startNewGame() {
 }
 
 function startNextLevel() {
+  const flyer = selectedPet();
+  if (playerData.pets.length > 0 && (!flyer || flyer.need)) {
+    showStable(showShop);
+    screenMessage.textContent = flyer?.need
+      ? `Your selected pet is ${flyer.need}. Care for it before the next level.`
+      : "Choose a pet before continuing.";
+    return;
+  }
   level += 1;
-  guaranteedMegaTailPending = false;
+  playerData.level = level;
+  savePlayerData();
+  score = 0;
+  scoreText.textContent = score;
   buildLevel();
   hideScreen();
   state = "playing";
   lastTime = performance.now();
   audio.startMusic();
+  if (level <= 4) showNotice("New Platy color, hat, and trail unlocked!", "ready", 3500);
 }
 
 function showScreen(kicker, title, message, buttonLabel, action) {
+  screenCard.classList.remove("stable-view", "shop-view", "instructions-view", "customize-view");
   screenKicker.textContent = kicker;
   screenTitle.textContent = title;
   screenMessage.textContent = message;
   screenButton.textContent = buttonLabel;
   screenButton.onclick = action;
   instructionsButton.classList.add("hidden");
+  stableButton.classList.add("hidden");
+  customizeButton.classList.add("hidden");
+  homeButton.classList.add("hidden");
+  stablePanel.classList.add("hidden");
+  shopPanel.classList.add("hidden");
+  customizePanel.classList.add("hidden");
+  accountPanel.classList.add("hidden");
   screen.classList.add("show");
 }
 
 function showHomeScreen() {
+  screenCard.classList.remove("stable-view", "shop-view", "instructions-view", "customize-view");
+  stableReturnAction = showHomeScreen;
   screenKicker.textContent = "A bouncy adventure";
   screenTitle.textContent = "DEFEAT PIGGY MASTER";
-  screenMessage.textContent = "Platy travels forward automatically. Turn with the left and right arrows, press the up arrow to jump, and scoop up stuffies from the trail with her tail!";
-  screenButton.textContent = "Start Game";
-  screenButton.onclick = startNewGame;
+  screenMessage.textContent = accountStore.activeAccountId
+    ? "Choose an account, then continue its saved adventure."
+    : "Press + to make a named game account and begin your adventure.";
+  screenButton.textContent = accountStore.activeAccountId ? "Start Game" : "Create Account";
+  screenButton.onclick = accountStore.activeAccountId ? startNewGame : createAccount;
   instructionsButton.classList.remove("hidden");
+  stableButton.classList.remove("hidden");
+  stableButton.disabled = !accountStore.activeAccountId;
+  customizeButton.classList.remove("hidden");
+  customizeButton.disabled = !accountStore.activeAccountId;
+  homeButton.classList.add("hidden");
+  accountPanel.classList.remove("hidden");
+  renderAccountMenu();
+  stablePanel.classList.add("hidden");
+  shopPanel.classList.add("hidden");
+  customizePanel.classList.add("hidden");
+  coinsText.textContent = playerData.coins;
   screen.classList.add("show");
+}
+
+function renderCustomize() {
+  const selectedColor = CUSTOM_CHOICES.color.find((choice) => choice.id === playerData.customization.color) || CUSTOM_CHOICES.color[0];
+  const selectedHat = CUSTOM_CHOICES.hat.find((choice) => choice.id === playerData.customization.hat) || CUSTOM_CHOICES.hat[0];
+  const selectedTrail = CUSTOM_CHOICES.trail.find((choice) => choice.id === playerData.customization.trail) || CUSTOM_CHOICES.trail[0];
+  const sections = [
+    ["color", "Platy Color"],
+    ["hat", "Hat"],
+    ["trail", "Trail Effect"],
+  ].map(([kind, title]) => {
+    const choices = CUSTOM_CHOICES[kind].map((choice) => {
+      const unlocked = playerData.level >= choice.unlock;
+      const selected = playerData.customization[kind] === choice.id;
+      const unlockText = unlocked ? choice.name : `Beat level ${choice.unlock - 1}`;
+      return `<button class="custom-choice ${selected ? "selected" : ""}" data-custom-kind="${kind}" data-custom-id="${choice.id}" ${unlocked ? "" : "disabled"}><span>${unlocked ? choice.icon : "🔒"}</span><small>${unlockText}</small></button>`;
+    }).join("");
+    return `<section class="custom-group"><h3>${title}</h3><div class="custom-options">${choices}</div></section>`;
+  }).join("");
+
+  customizePanel.innerHTML = `
+    <div class="custom-preview trail-${selectedTrail.id}">
+      <div class="preview-trail" aria-hidden="true">${selectedTrail.icon}</div>
+      <div class="preview-platy" style="filter:${selectedColor.filter}"></div>
+      <div class="preview-hat" aria-hidden="true">${selectedHat.id === "none" ? "" : selectedHat.icon}</div>
+      <strong>Level ${playerData.level} Platy</strong>
+    </div>
+    ${sections}`;
+
+  customizePanel.querySelectorAll("[data-custom-kind]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const kind = button.dataset.customKind;
+      const choice = CUSTOM_CHOICES[kind]?.find((item) => item.id === button.dataset.customId);
+      if (!choice || playerData.level < choice.unlock) return;
+      playerData.customization[kind] = choice.id;
+      savePlayerData();
+      audio.purchaseDing();
+      renderCustomize();
+    });
+  });
+}
+
+function showCustomize() {
+  showScreen("Platy's closet", "Customize Platy", "Choose a color, hat, and trail. Beat more levels to unlock everything!", "Back", showHomeScreen);
+  screenCard.classList.add("customize-view");
+  customizePanel.classList.remove("hidden");
+  renderCustomize();
 }
 
 function showInstructions() {
   const instructions = [
-    "← →  Turn Platy left and right.",
-    "↑  Jump over fruit and scoop up stuffies with Platy's tail.",
-    "Big stuffies give 1 point. Smaller, harder stuffies give 5 points. Every stuffy helps Platy grow.",
-    "Touching fruit removes 2 points.",
-    "A magnet gives one pull that brings in the stuffies on the trail. Invisibility protects Platy from fruit for 15 seconds. Mega Tail makes Platy's tail huge for 10 seconds.",
-    "Piggy Master falls every 20 seconds. Dodge her while Platy is small. When Platy is bigger, get under Piggy Master so she bounces into space!",
+    "GAME ACCOUNTS\n• Press the + circle on the main menu to create an account and enter the player's name.\n• Press a named circle to use that account. Each account separately saves its level, pets, coins, stalls, inventory, selected pet, and pet-care progress.",
+    "RUNNING CONTROLS\n• Use ← and → to steer Platy.\n• Press ↑ to jump over fruit and scoop up stuffies with Platy's tail. Touch controls work the same way.\n• Big stuffies give 1 point. Smaller, harder stuffies give 5 points. Every stuffy makes Platy grow.\n• Touching fruit removes 2 points. Jumping high enough avoids it.",
+    "POWERS\n• Magnet: pulls every stuffy currently on the trail toward Platy's tail.\n• Invisibility: protects Platy from fruit for 15 seconds. Piggy Master can still crush her.\n• Mega Tail: makes Platy's tail much larger for 10 seconds.\n• Golden Coin: adds 50 saved coins to the active account.\n• All active power effects reset to normal at the beginning of every level.",
+    "COIN TRAILS\n• Trails of golden coins sometimes appear while Platy is running or flying.\n• Steer through them to collect them. Every golden coin adds 1 saved coin for the shop.",
+    "PIGGY MASTER\n• Piggy Master starts by falling every 20 seconds and returns sooner on higher levels. Watch the warning and landing circle.\n• If Platy is still small, steer away or she will be crushed.\n• When Platy has grown bigger, move under Piggy Master so she bounces into space.\n• If a level is failed, Retry Level restarts that same level. Account progress, pets, coins, inventory, and care are not reset.",
+    "CLOUD FLIGHT AND PETS\n• After Piggy Master flies away, double-tap ↑ to begin flying. Steer with ← and → and press ↑ near a cloud to search it.\n• You may search up to two clouds per round. Each cloud has a 40% chance of containing a unicorn or dragon, and only one pet can be found per round.\n• A pet needs an empty stable stall. When a pet is selected, Platy rides it during cloud flight.",
+    "COINS AND THE SHOP\n• Fly through the magic door to enter the shop. Half the round's score, rounded up, becomes saved coins, and the round score resets.\n• You may buy five items per shop visit. Unicorn Food costs 10, Dragon Food costs 10, Water costs 15, Pet Soap costs 15, and a new Stable Stall costs 10 coins.",
+    "PET CARE\n• The selected pet automatically rotates to the next saved pet after every completed round.\n• Pets can become hungry, thirsty, or dirty. Hungry unicorns need Unicorn Food, hungry dragons need Dragon Food, thirsty pets need Water, and dirty pets need Soap.\n• A newly adopted pet gets one full round before its first care need. After care, it stays happy for another 1–2 rounds.\n• The stable shows missed care from 0/3 through 3/3. If a fourth round ends without the needed care, the pet leaves permanently.\n• A pet that currently needs care must be helped before it can fly in the next round.",
+    "CUSTOMIZE PLATY\n• Open Customize Platy on the home screen to choose her color, hat, and trail effect.\n• Beating levels 1, 2, and 3 unlocks more choices. Each game account saves its own outfit.",
   ].join("\n\n");
   showScreen("How to play", "Instructions", instructions, "Back", showHomeScreen);
+  screenCard.classList.add("instructions-view");
+}
+
+function petName(pet) {
+  return pet.name || "New Friend";
+}
+
+function renderStable() {
+  const cards = [];
+  for (let stall = 0; stall < playerData.stalls; stall += 1) {
+    const pet = playerData.pets[stall];
+    if (!pet) {
+      cards.push(`<article class="stall-card empty-stall"><div class="stall-number">Stall ${stall + 1}</div><div class="hay-pile" aria-hidden="true"></div><div class="pet-icon">🪹</div><h3>Empty Stall</h3><p>Ready for a new pet!</p><div class="stall-gate" aria-hidden="true"></div></article>`);
+      continue;
+    }
+    const selected = pet.id === playerData.selectedPetId;
+    const needText = pet.need === "hungry"
+      ? "🍽️ Hungry"
+      : pet.need === "thirsty"
+        ? "💧 Thirsty"
+        : pet.need === "dirty"
+          ? "🫧 Needs a bath"
+          : "😊 Ready to fly";
+    const foodKey = pet.type === "unicorn" ? "unicornFood" : "dragonFood";
+    const careItem = pet.need === "thirsty" ? "water" : pet.need === "dirty" ? "soap" : foodKey;
+    const careCount = playerData.inventory[careItem];
+    const careLabel = pet.need === "thirsty" ? "Give Water" : pet.need === "dirty" ? "Wash Pet" : "Give Food";
+    const uncaredRounds = Math.max(0, Number(pet.uncaredRounds) || 0);
+    const careWarning = pet.need ? `<p class="care-warning">Care missed: ${uncaredRounds}/${MAX_UNCARED_ROUNDS} rounds</p>` : "";
+    const petPosition = pet.type === "unicorn" ? "left" : "right";
+    cards.push(`
+      <article class="stall-card ${selected ? "selected" : ""}">
+        <div class="stall-number">Stall ${stall + 1}</div>
+        <div class="pet-nameplate">${petName(pet)}</div>
+        <div class="hay-pile" aria-hidden="true"></div>
+        <div class="pet-preview ${petPosition}" style="filter: hue-rotate(${pet.colorHue}deg) saturate(1.15)" aria-label="${pet.type}"></div>
+        <h3>${pet.type === "unicorn" ? "Unicorn" : "Dragon"}</h3>
+        <p>${needText}</p>
+        ${careWarning}
+        <button data-select-pet="${pet.id}" ${selected ? "disabled" : ""}>${selected ? "Selected" : "Choose"}</button>
+        ${pet.need ? `<button data-care-pet="${pet.id}" ${careCount <= 0 ? "disabled" : ""}>${careLabel} (${careCount})</button>` : ""}
+        <div class="stall-gate" aria-hidden="true"></div>
+      </article>`);
+  }
+  stablePanel.innerHTML = `
+    <div class="stable-building walk-in-stable">
+      <div class="stable-roof" aria-hidden="true"><span>★</span></div>
+      <div class="stable-back-wall" aria-hidden="true">
+        <span class="stable-window stable-window-left"></span>
+        <span class="stable-window stable-window-right"></span>
+        <span class="stable-rafter rafter-left"></span>
+        <span class="stable-rafter rafter-right"></span>
+      </div>
+      <div class="stable-sign">PLATY'S PET STABLE</div>
+      <div class="stable-lantern lantern-left" aria-hidden="true">✦</div>
+      <div class="stable-lantern lantern-right" aria-hidden="true">✦</div>
+      <p class="shop-summary">Stalls: ${playerData.pets.length}/${playerData.stalls} · 🪙 ${playerData.coins} coins · Unicorn food: ${playerData.inventory.unicornFood} · Dragon food: ${playerData.inventory.dragonFood} · Water: ${playerData.inventory.water} · Soap: ${playerData.inventory.soap}</p>
+      <div class="stable-grid">${cards.join("")}</div>
+      <div class="stable-walkway" aria-hidden="true"><span>WELCOME</span></div>
+      <div class="stable-floor" aria-hidden="true"></div>
+    </div>`;
+
+  stablePanel.querySelectorAll("[data-select-pet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      playerData.selectedPetId = button.dataset.selectPet;
+      savePlayerData();
+      renderStable();
+    });
+  });
+  stablePanel.querySelectorAll("[data-care-pet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const pet = playerData.pets.find((candidate) => candidate.id === button.dataset.carePet);
+      if (!pet || !pet.need) return;
+      const item = pet.need === "thirsty" ? "water" : pet.need === "dirty" ? "soap" : pet.type === "unicorn" ? "unicornFood" : "dragonFood";
+      if (playerData.inventory[item] <= 0) return;
+      playerData.inventory[item] -= 1;
+      pet.need = null;
+      pet.uncaredRounds = 0;
+      pet.levelsUntilNeed = Math.floor(random(1, 3));
+      savePlayerData();
+      renderStable();
+    });
+  });
+}
+
+function showStable(returnAction = showHomeScreen) {
+  stableReturnAction = returnAction;
+  showScreen("Saved pets", "Pet Stable", "Choose a pet and care for anything it needs.", "Back", () => stableReturnAction());
+  screenCard.classList.add("stable-view");
+  stablePanel.classList.remove("hidden");
+  renderStable();
+}
+
+function buyShopItem(item) {
+  if (shopPurchases >= 5) return;
+  const prices = { unicornFood: 10, dragonFood: 10, water: 15, soap: 15, stall: 10 };
+  const price = prices[item];
+  if (playerData.coins < price) return;
+  playerData.coins -= price;
+  if (item === "stall") playerData.stalls += 1;
+  else playerData.inventory[item] += 1;
+  shopPurchases += 1;
+  savePlayerData();
+  audio.purchaseDing();
+  renderShop();
+}
+
+function renderShop() {
+  const items = [
+    ["unicornFood", "🧁", "Unicorn Food", 10, "Moonbeam Treats", "pink"],
+    ["dragonFood", "🍖", "Dragon Food", 10, "Dragon Pantry", "orange"],
+    ["water", "💧", "Fresh Water", 15, "Crystal Springs", "blue"],
+    ["soap", "🧼", "Pet Soap", 15, "Bubble Bath", "purple"],
+    ["stall", "🏠", "Stable Stall", 10, "Builder's Booth", "green"],
+  ];
+  const cards = items.map(([key, icon, name, price, boothName, color]) => `
+    <article class="shop-card booth-${color}">
+      <div class="booth-awning" aria-hidden="true"></div>
+      <div class="booth-sign">${boothName}</div>
+      <div class="booth-shelf">
+        <div class="pet-icon" aria-hidden="true">${icon}</div>
+        <h3>${name}</h3>
+      </div>
+      <div class="booth-counter">
+        <p><span aria-hidden="true">🪙</span> ${price}</p>
+        <button data-buy="${key}" ${shopPurchases >= 5 || playerData.coins < price ? "disabled" : ""}>Buy</button>
+      </div>
+    </article>`).join("");
+  shopPanel.innerHTML = `
+    <div class="walk-in-shop">
+      <div class="shop-back-wall" aria-hidden="true">
+        <span class="shop-window left-window"></span>
+        <span class="shop-window right-window"></span>
+      </div>
+      <div class="shop-hanging-sign">PLATY'S SKY MARKET</div>
+      <p class="shop-summary"><span>🪙 ${playerData.coins} coins</span><span>Shopping bag: ${shopPurchases}/5</span></p>
+      <div class="shop-grid">${cards}</div>
+      <div class="shop-aisle" aria-hidden="true"><span>WELCOME</span></div>
+    </div>`;
+  shopPanel.querySelectorAll("[data-buy]").forEach((button) => {
+    button.addEventListener("click", () => buyShopItem(button.dataset.buy));
+  });
+}
+
+function showShop() {
+  showScreen("Magic cloud shop", "Spend Your Coins", `This level earned ${coinsEarnedThisLevel} coins. Buy up to five things.`, "Next Level", startNextLevel);
+  screenCard.classList.add("shop-view");
+  shopPanel.classList.remove("hidden");
+  stableButton.classList.remove("hidden");
+  homeButton.classList.remove("hidden");
+  stableReturnAction = showShop;
+  renderShop();
+}
+
+function returnHomeFromShop() {
+  level += 1;
+  playerData.level = level;
+  levelText.textContent = level;
+  savePlayerData();
+  state = "title";
+  audio.stopMusic();
+  showHomeScreen();
 }
 
 function hideScreen() {
@@ -438,7 +1021,7 @@ function updateScore(change) {
 }
 
 function isPlatyReady() {
-  return player.radius > 59;
+  return player.radius > platyReadySizeForLevel();
 }
 
 function updatePlayer(dt) {
@@ -478,7 +1061,7 @@ function jump() {
 }
 
 function updateToys(dt) {
-  const travelSpeed = 82 + level * 4;
+  const travelSpeed = trailSpeedForLevel();
   for (const toy of toys) {
     if (toy.caught > 0) {
       toy.caught -= dt;
@@ -545,7 +1128,7 @@ function updateTailCollections(dt) {
 }
 
 function updateFruits(dt) {
-  const travelSpeed = 82 + level * 4;
+  const travelSpeed = fruitSpeedForLevel();
   for (const fruit of fruits) {
     fruit.y += travelSpeed * dt;
     if (fruit.y > HEIGHT + 75) {
@@ -556,6 +1139,8 @@ function updateFruits(dt) {
 
   fruitHitCooldown = Math.max(0, fruitHitCooldown - dt);
   if (invisibleTimer > 0) return;
+  // Any time Platy is airborne, she passes safely over fruit below her.
+  if (player.jumpHeight > 0 || player.jumpVelocity !== 0) return;
   if (fruitHitCooldown > 0) return;
 
   for (const fruit of fruits) {
@@ -574,11 +1159,83 @@ function updateFruits(dt) {
   }
 }
 
+function collectTrailCoin(coin) {
+  if (coin.collected) return;
+  coin.collected = true;
+  playerData.coins += 1;
+  savePlayerData();
+  audio.collect();
+}
+
+function spawnRunningCoinTrail() {
+  const centerLane = random(-0.48, 0.48);
+  runningCoins = Array.from({ length: 8 }, (_, index) => ({
+    y: HORIZON + 20 - index * 52,
+    lane: Math.max(-0.78, Math.min(0.78, centerLane + Math.sin(index * 0.8) * 0.16)),
+    x: WIDTH / 2,
+    radius: 15,
+    phase: index * 0.65,
+    collected: false,
+  }));
+  showNotice("A trail of coins appeared!", "ready", 1800);
+}
+
+function updateRunningCoins(dt) {
+  if (runningCoins.length === 0) {
+    runningCoinTimer -= dt;
+    if (runningCoinTimer <= 0) spawnRunningCoinTrail();
+    return;
+  }
+
+  const playerCenter = { x: player.x, y: player.y - player.jumpHeight };
+  runningCoins.forEach((coin) => {
+    coin.y += trailSpeedForLevel() * dt;
+    const usableHalf = Math.max(10, pathWidthAt(coin.y) / 2 - 45);
+    coin.x = pathCenter(coin.y) + coin.lane * usableHalf;
+    if (!coin.collected && distance(playerCenter, coin) < player.radius * 0.72 + coin.radius) {
+      collectTrailCoin(coin);
+    }
+  });
+  runningCoins = runningCoins.filter((coin) => !coin.collected && coin.y < HEIGHT + 70);
+  if (runningCoins.length === 0) runningCoinTimer = random(10, 17);
+}
+
+function spawnSkyCoinTrail() {
+  const centerLane = random(-0.5, 0.5);
+  skyCoins = Array.from({ length: 9 }, (_, index) => ({
+    x: WIDTH / 2,
+    y: 90 - index * 48,
+    lane: Math.max(-0.82, Math.min(0.82, centerLane + Math.sin(index * 0.7) * 0.18)),
+    radius: 7,
+    phase: index * 0.7,
+    collected: false,
+  }));
+  showNotice("Flying coin trail ahead!", "ready", 1800);
+}
+
+function updateSkyCoins(dt, skyPlayer) {
+  if (skyCoins.length === 0) {
+    skyCoinTimer -= dt;
+    if (skyCoinTimer <= 0) spawnSkyCoinTrail();
+    return;
+  }
+
+  skyCoins.forEach((coin) => {
+    const depth = Math.max(0, Math.min(1, (coin.y - 80) / (HEIGHT - 140)));
+    coin.y += (58 + depth * 112) * dt;
+    const spread = 45 + depth * (WIDTH * 0.46);
+    coin.x = WIDTH / 2 + coin.lane * spread;
+    coin.radius = 7 + depth * 13;
+    if (!coin.collected && distance(skyPlayer, coin) < 38 + coin.radius) collectTrailCoin(coin);
+  });
+  skyCoins = skyCoins.filter((coin) => !coin.collected && coin.y < HEIGHT + 70);
+  if (skyCoins.length === 0) skyCoinTimer = random(8, 14);
+}
+
 function spawnBonus() {
-  const bonusTypes = ["magnet", "invisible", "mega-tail"];
+  const bonusTypes = ["magnet", "invisible", "mega-tail", "coins"];
   const choices = bonusTypes.filter((typeName) => typeName !== lastBonusType);
-  const type = guaranteedMegaTailPending ? "mega-tail" : choices[Math.floor(Math.random() * choices.length)];
-  guaranteedMegaTailPending = false;
+  const type = choices[Math.floor(Math.random() * choices.length)];
   lastBonusType = type;
   const position = positionOnPath(HORIZON + 24, 30);
   currentBonus = {
@@ -625,9 +1282,13 @@ function updateBonus(dt) {
     } else if (currentBonus.type === "invisible") {
       invisibleTimer = 15;
       showNotice("INVISIBLE! Fruit cannot take points for 15 seconds!", "ready", 2600);
-    } else {
+    } else if (currentBonus.type === "mega-tail") {
       megaTailTimer = 10;
       showNotice("MEGA TAIL! Platy can scoop stuffies from far away for 10 seconds!", "ready", 3000);
+    } else {
+      playerData.coins += 50;
+      savePlayerData();
+      showNotice("COIN POWER! You won 50 coins!", "ready", 3000);
     }
     audio.powerUp();
     currentBonus = null;
@@ -678,7 +1339,7 @@ function updateBoss(dt) {
       showNotice("SQUASH! Piggy Master crushed Platy!", "danger", 1200);
     } else {
       showNotice(isPlatyReady() ? "She missed! Try to get under her next time." : "Boom! Keep growing before she comes back.", "danger", 2600);
-      bossTimer = 20;
+      bossTimer = bossIntervalForLevel();
       bossTarget = null;
     }
   }
@@ -689,43 +1350,212 @@ function updateOutcome(dt) {
   outcomeTimer += dt;
 
   if (state === "boss-bounce" && outcomeTimer > 1.8) {
-    state = "level-complete";
-    showScreen(
-      "Piggy Master flew into space!",
-      `Level ${level} Complete!`,
-      `Platy was bigger, so Piggy Master bounced right off! Your score is ${score}.`,
-      "Next Level",
-      startNextLevel,
-    );
+    state = "sky-wait";
+    bossTarget = null;
+    lastUpTap = 0;
+    showNotice("Piggy Master is gone! Double-tap UP to fly!", "ready", 6000);
   }
 
   if (state === "crushed" && outcomeTimer > 1.15) {
     state = "game-over";
     showScreen(
       "Squashed by Piggy Master!",
-      "Game Over",
-      `Platy was still too small. You scored ${score} points. Catch more stuffies and try again!`,
-      "Play Again",
-      startNewGame,
+      `Level ${level} Failed`,
+      `Platy was still too small. You scored ${score} points. Retry level ${level}; your account, pets, coins, inventory, and care progress are safe.`,
+      `Retry Level ${level}`,
+      retryCurrentLevel,
     );
+  }
+}
+
+function makeSkyCloud(y = random(-320, -80)) {
+  return {
+    x: WIDTH / 2,
+    y,
+    radius: random(55, 78),
+    lane: random(-0.9, 0.9),
+    renderRadius: 24,
+    checked: false,
+    reveal: null,
+    revealAge: 0,
+    drift: random(0, Math.PI * 2),
+  };
+}
+
+function startSkyPhase() {
+  const flyer = selectedPet();
+  if (playerData.pets.length > 0 && (!flyer || flyer.need)) {
+    showNotice("Your flying pet needs care in the stable first!", "danger", 4000);
+    return;
+  }
+  state = "sky";
+  skyTime = 0;
+  skyBoost = 0;
+  cloudChecks = 0;
+  petFoundThisLevel = false;
+  skyDoor = null;
+  skyDoorDelay = 0;
+  skyCoins = [];
+  skyCoinTimer = 2.5;
+  player.x = WIDTH / 2;
+  player.y = HEIGHT - 125;
+  skyClouds = [makeSkyCloud(105), makeSkyCloud(245), makeSkyCloud(-40), makeSkyCloud(-210)];
+  audio.startMusic();
+  showNotice("Fly forward into a cloud and press UP to search it!", "", 4000);
+}
+
+function triggerSkyBoost() {
+  if (skyBoost <= 0) skyBoost = 0.8;
+}
+
+function adoptPet(type, cloud) {
+  if (openStallCount() <= 0) {
+    cloud.reveal = "no-stall";
+    showNotice("No empty stall! Buy another stall at the shop.", "danger", 3500);
+    return false;
+  }
+  const chosenName = chooseNewPetName(playerData.pets);
+  const pet = {
+    id: `pet-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+    type,
+    need: null,
+    // A new pet gets one full adventure before needing its first care item.
+    levelsUntilNeed: 1,
+    uncaredRounds: 0,
+    adoptedLevel: level,
+    colorHue: (playerData.pets.length * 67) % 360,
+    name: chosenName,
+  };
+  playerData.pets.push(pet);
+  if (!playerData.selectedPetId) playerData.selectedPetId = pet.id;
+  cloud.reveal = type;
+  cloud.revealHue = pet.colorHue;
+  petFoundThisLevel = true;
+  savePlayerData();
+  showNotice(`You found ${pet.name} the ${type}! Your new pet is waiting in the stable!`, "ready", 4500);
+  return true;
+}
+
+function searchCloud(cloud) {
+  if (cloud.checked || petFoundThisLevel || cloudChecks >= 2) return;
+  cloud.checked = true;
+  cloudChecks += 1;
+  if (Math.random() < PET_FIND_CHANCE) {
+    const type = Math.random() < 0.5 ? "unicorn" : "dragon";
+    adoptPet(type, cloud);
+  } else {
+    cloud.reveal = "empty";
+    showNotice(cloudChecks < 2 ? "This cloud is empty. You can try one more!" : "Both clouds were empty this time.", "", 3200);
+  }
+  skyDoorDelay = 4;
+}
+
+function advancePetNeeds() {
+  const departedPets = [];
+  playerData.pets = playerData.pets.filter((pet) => {
+    if (pet.adoptedLevel === level) return true;
+    if (pet.need) {
+      pet.uncaredRounds = (Number(pet.uncaredRounds) || 0) + 1;
+      if (pet.uncaredRounds > MAX_UNCARED_ROUNDS) {
+        departedPets.push(pet);
+        return false;
+      }
+      return true;
+    }
+    pet.levelsUntilNeed = (pet.levelsUntilNeed || 3) - 1;
+    if (pet.levelsUntilNeed <= 0) {
+      const careNeeds = ["hungry", "thirsty", "dirty"];
+      pet.need = careNeeds[Math.floor(Math.random() * careNeeds.length)];
+      pet.uncaredRounds = 0;
+    }
+    return true;
+  });
+
+  if (departedPets.length > 0) {
+    if (!playerData.pets.some((pet) => pet.id === playerData.selectedPetId)) {
+      playerData.selectedPetId = playerData.pets[0]?.id || null;
+    }
+    const names = departedPets.map((pet) => petName(pet)).join(" and ");
+    showNotice(`${names} left the stable after going too long without care.`, "danger", 5000);
+  }
+}
+
+function enterShop() {
+  const completedRoundPetId = playerData.selectedPetId;
+  state = "shop";
+  coinsEarnedThisLevel = Math.ceil(score / 2);
+  playerData.coins += coinsEarnedThisLevel;
+  score = 0;
+  scoreText.textContent = score;
+  shopPurchases = 0;
+  advancePetNeeds();
+  selectNextPet(completedRoundPetId);
+  savePlayerData();
+  showShop();
+}
+
+function updateSky(dt) {
+  skyTime += dt;
+  worldTime += dt;
+  let direction = 0;
+  if (keys.has("ArrowLeft")) direction -= 1;
+  if (keys.has("ArrowRight")) direction += 1;
+  player.x = Math.max(55, Math.min(WIDTH - 55, player.x + direction * 285 * dt));
+
+  skyBoost = Math.max(0, skyBoost - dt);
+  const boostHeight = skyBoost > 0 ? Math.sin((skyBoost / 0.8) * Math.PI) * 34 : 0;
+  const skyPlayer = { x: player.x, y: player.y - boostHeight };
+  updateSkyCoins(dt, skyPlayer);
+
+  skyClouds.forEach((cloud) => {
+    const depth = Math.max(0, Math.min(1, (cloud.y - 80) / (HEIGHT - 140)));
+    cloud.y += (50 + depth * 105) * dt;
+    const spread = 45 + depth * (WIDTH * 0.46);
+    cloud.x = WIDTH / 2 + cloud.lane * spread + Math.sin(skyTime * 0.8 + cloud.drift) * (4 + depth * 13);
+    cloud.renderRadius = cloud.radius * (0.28 + depth * 0.9);
+    if (cloud.reveal) cloud.revealAge += dt;
+    if (cloud.y > HEIGHT + 100) Object.assign(cloud, makeSkyCloud(random(75, 115)));
+    if (skyBoost > 0 && !cloud.checked && distance(skyPlayer, cloud) < cloud.renderRadius + 42) searchCloud(cloud);
+  });
+
+  const searchFinished = petFoundThisLevel || cloudChecks >= 2 || skyTime > 28;
+  if (searchFinished && !skyDoor) {
+    skyDoorDelay = Math.max(0, skyDoorDelay - dt);
+    if (skyDoorDelay <= 0) {
+      skyDoor = { x: WIDTH / 2, y: 92, lane: random(-0.45, 0.45), scale: 0.3 };
+      showNotice("The magic shop door appeared! Fly through it!", "ready", 3500);
+    }
+  }
+
+  if (skyDoor) {
+    const doorDepth = Math.max(0, Math.min(1, (skyDoor.y - 80) / (HEIGHT - 140)));
+    skyDoor.y += (55 + doorDepth * 105) * dt;
+    skyDoor.x = WIDTH / 2 + skyDoor.lane * (45 + doorDepth * WIDTH * 0.46);
+    skyDoor.scale = 0.28 + doorDepth * 0.92;
+    if (distance(skyPlayer, skyDoor) < 48 + 48 * skyDoor.scale) enterShop();
+    else if (skyDoor.y > HEIGHT + 100) {
+      skyDoor.lane = (player.x - WIDTH / 2) / (WIDTH * 0.46);
+      skyDoor.y = 90;
+    }
   }
 }
 
 function update(dt) {
   worldTime += dt;
-  pathDistance += (82 + level * 4) * dt;
+  pathDistance += trailSpeedForLevel() * dt;
   earthquake = Math.max(0, earthquake - dt);
   updatePlayer(dt);
   updateBonus(dt);
   updateToys(dt);
   updateTailCollections(dt);
   updateFruits(dt);
+  updateRunningCoins(dt);
   updateBoss(dt);
   updateCracks(dt);
 }
 
 function updateCracks(dt) {
-  const travelSpeed = 82 + level * 4;
+  const travelSpeed = trailSpeedForLevel();
   groundCracks.forEach((crack) => {
     crack.y += travelSpeed * dt;
     crack.x = pathCenter(crack.y) + crack.lane * pathWidthAt(crack.y) / 2;
@@ -857,25 +1687,17 @@ function drawBackground() {
 }
 
 function drawSprite(spriteNumber, x, y, size, alpha = 1) {
-  if (!sprites.complete || !sprites.naturalWidth) return;
-  const columns = 4;
-  const rows = 3;
-  const sourceWidth = sprites.naturalWidth / columns;
-  const sourceHeight = sprites.naturalHeight / rows;
-  const column = spriteNumber % columns;
-  const row = Math.floor(spriteNumber / columns);
+  const sprite = spriteImages[spriteNumber];
+  if (!sprite || !sprite.complete || !sprite.naturalWidth) return;
+  const drawHeight = size * (sprite.naturalHeight / sprite.naturalWidth);
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.drawImage(
-    sprites,
-    column * sourceWidth,
-    row * sourceHeight,
-    sourceWidth,
-    sourceHeight,
+    sprite,
     x - size / 2,
-    y - size / 2,
+    y - drawHeight / 2,
     size,
-    size * (sourceHeight / sourceWidth),
+    drawHeight,
   );
   ctx.restore();
 }
@@ -888,11 +1710,256 @@ function drawSpriteRotated(spriteNumber, x, y, size, rotation) {
   ctx.restore();
 }
 
+function drawPetSprite(type, x, y, size, alpha = 1, colorHue = 0) {
+  if (!flyingPets.complete || !flyingPets.naturalWidth) return;
+  const sourceWidth = flyingPets.naturalWidth / 2;
+  const sourceHeight = flyingPets.naturalHeight;
+  const petColumn = type === "unicorn" ? 0 : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.filter = `hue-rotate(${colorHue}deg) saturate(1.15)`;
+  ctx.drawImage(
+    flyingPets,
+    petColumn * sourceWidth, 0, sourceWidth, sourceHeight,
+    x - size / 2, y - size * (sourceHeight / sourceWidth) / 2,
+    size, size * (sourceHeight / sourceWidth),
+  );
+  ctx.restore();
+}
+
+function drawRidingPetSprite(type, x, y, size, colorHue = 0) {
+  if (!platyRidingPets.complete || !platyRidingPets.naturalWidth) return;
+  const sourceWidth = platyRidingPets.naturalWidth / 2;
+  const sourceHeight = platyRidingPets.naturalHeight;
+  const petColumn = type === "unicorn" ? 0 : 1;
+  ctx.save();
+  ctx.filter = `hue-rotate(${colorHue}deg) saturate(1.1)`;
+  ctx.drawImage(
+    platyRidingPets,
+    petColumn * sourceWidth, 0, sourceWidth, sourceHeight,
+    x - size / 2, y - size * (sourceHeight / sourceWidth) / 2,
+    size, size * (sourceHeight / sourceWidth),
+  );
+  ctx.restore();
+}
+
+function drawCloud(cloud) {
+  const puff = cloud.renderRadius || cloud.radius;
+  ctx.save();
+  ctx.fillStyle = cloud.checked ? "rgb(222 233 255 / 86%)" : "rgb(255 255 255 / 94%)";
+  ctx.shadowColor = "rgb(90 130 190 / 30%)";
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  ctx.arc(cloud.x - puff * 0.42, cloud.y + puff * 0.08, puff * 0.52, 0, Math.PI * 2);
+  ctx.arc(cloud.x, cloud.y - puff * 0.2, puff * 0.7, 0, Math.PI * 2);
+  ctx.arc(cloud.x + puff * 0.48, cloud.y + puff * 0.08, puff * 0.48, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  if (cloud.reveal === "unicorn" || cloud.reveal === "dragon") {
+    drawPetSprite(cloud.reveal, cloud.x, cloud.y - puff * 0.8 - Math.sin(worldTime * 5) * 8, Math.max(34, puff * 1.15), 1, cloud.revealHue || 0);
+  } else if (cloud.reveal === "empty" || cloud.reveal === "no-stall") {
+    ctx.fillStyle = "#5d4b78";
+    ctx.font = "900 22px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText(cloud.reveal === "empty" ? "Empty!" : "No stall!", cloud.x, cloud.y + 8);
+    ctx.textAlign = "left";
+  }
+}
+
+function drawPlatyTrail(x, y, size = 1) {
+  const trail = playerData.customization.trail;
+  if (trail === "none") return;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.shadowBlur = 12 * size;
+  for (let index = 1; index <= 10; index += 1) {
+    const fade = (11 - index) / 11;
+    const trailX = x + Math.sin(worldTime * 7 + index * 1.7) * 23 * size;
+    const trailY = y + index * 14 * size;
+    ctx.globalAlpha = fade * 0.98;
+    if (trail === "rainbow") {
+      const colors = ["#ff5e8a", "#ffb52e", "#fff05c", "#67db78", "#56b7ff", "#b778ff"];
+      ctx.strokeStyle = colors[index % colors.length];
+      ctx.shadowColor = colors[index % colors.length];
+      ctx.lineWidth = 12 * size;
+      ctx.beginPath();
+      ctx.moveTo(trailX - 12 * size, trailY);
+      ctx.lineTo(trailX + 12 * size, trailY);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = trail === "stars" ? "#fff06a" : "#ffffff";
+      ctx.shadowColor = trail === "stars" ? "#ff9f1c" : "#c264ff";
+      ctx.translate(trailX, trailY);
+      ctx.rotate(worldTime * 2 + index);
+      const radius = (trail === "stars" ? 9 : 7) * size;
+      ctx.beginPath();
+      for (let point = 0; point < 8; point += 1) {
+        const angle = point * Math.PI / 4;
+        const pointRadius = point % 2 === 0 ? radius : radius * 0.35;
+        ctx.lineTo(Math.cos(angle) * pointRadius, Math.sin(angle) * pointRadius);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+  }
+  ctx.restore();
+}
+
+function drawPlatyHat(x, y, size = 38) {
+  const hat = CUSTOM_CHOICES.hat.find((choice) => choice.id === playerData.customization.hat);
+  if (!hat || hat.id === "none") return;
+  ctx.save();
+  const glow = ctx.createRadialGradient(x, y, 0, x, y, size * 0.72);
+  glow.addColorStop(0, "rgb(255 255 210 / 78%)");
+  glow.addColorStop(0.5, "rgb(255 231 100 / 42%)");
+  glow.addColorStop(1, "rgb(255 231 100 / 0%)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(x, y, size * 0.72, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.font = `${size}px "Segoe UI Emoji", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.filter = "brightness(1.35) saturate(1.4)";
+  ctx.shadowColor = "#fff27a";
+  ctx.shadowBlur = 16;
+  ctx.fillText(hat.icon, x, y);
+  ctx.restore();
+}
+
+function drawSkyPlayer() {
+  const boostHeight = skyBoost > 0 ? Math.sin((skyBoost / 0.8) * Math.PI) * 34 : 0;
+  const x = player.x;
+  const y = player.y - boostHeight + Math.sin(worldTime * 6) * 4;
+  const flyer = selectedPet();
+  drawPlatyTrail(x, y + 48, 1.15);
+  if (flyer) {
+    drawRidingPetSprite(flyer.type, x, y, 195, flyer.colorHue || 0);
+  } else if (platyTailAnimation.complete && platyTailAnimation.naturalWidth) {
+    const sourceWidth = platyTailAnimation.naturalWidth / 2;
+    const sourceHeight = platyTailAnimation.naturalHeight;
+    const size = 98;
+    const height = size * (sourceHeight / sourceWidth);
+    ctx.save();
+    ctx.filter = platyColorFilter();
+    ctx.drawImage(
+      platyTailAnimation,
+      (Math.floor(worldTime * 7) % 2) * sourceWidth, 0, sourceWidth, sourceHeight,
+      x - size / 2, y - height / 2, size, height,
+    );
+    ctx.restore();
+  }
+  drawPlatyHat(x, y - (flyer ? 78 : 53), flyer ? 52 : 50);
+}
+
+function drawCoinPickup(coin, radius) {
+  const spin = 0.28 + Math.abs(Math.cos(worldTime * 7 + coin.phase)) * 0.72;
+  ctx.save();
+  ctx.translate(coin.x, coin.y);
+  ctx.scale(spin, 1);
+  ctx.shadowColor = "#ffcf33";
+  ctx.shadowBlur = Math.max(5, radius * 0.7);
+  ctx.fillStyle = "#ffd83d";
+  ctx.strokeStyle = "#a96300";
+  ctx.lineWidth = Math.max(2, radius * 0.15);
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "#fff39a";
+  ctx.lineWidth = Math.max(1.5, radius * 0.1);
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * 0.66, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "#9d5b00";
+  ctx.font = `900 ${Math.max(8, radius * 1.05)}px Trebuchet MS`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("C", 0, 1);
+  ctx.restore();
+}
+
+function drawRunningCoins() {
+  runningCoins.forEach((coin) => {
+    const depthScale = 0.35 + pathDepth(coin.y) * 0.9;
+    drawCoinPickup(coin, coin.radius * depthScale);
+  });
+}
+
+function drawSkyCoins() {
+  skyCoins.forEach((coin) => drawCoinPickup(coin, coin.radius));
+}
+
+function drawSky() {
+  const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  gradient.addColorStop(0, "#4ca8ff");
+  gradient.addColorStop(0.65, "#9ee7ff");
+  gradient.addColorStop(1, "#e5faff");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+  // These shining lines meet at the horizon, making the flight feel forward
+  // like the dirt trail does during the running part of the game.
+  ctx.save();
+  ctx.strokeStyle = "rgb(255 255 255 / 22%)";
+  ctx.lineWidth = 3;
+  for (let lane = -4; lane <= 4; lane += 1) {
+    ctx.beginPath();
+    ctx.moveTo(WIDTH / 2 + lane * 8, 86);
+    ctx.lineTo(WIDTH / 2 + lane * 125, HEIGHT);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  for (let i = 0; i < 18; i += 1) {
+    const x = (i * 157 + 70) % WIDTH;
+    const y = (i * 83 + skyTime * 24) % HEIGHT;
+    ctx.fillStyle = "rgb(255 255 255 / 34%)";
+    ctx.beginPath();
+    ctx.arc(x, y, 12 + (i % 3) * 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawSkyCoins();
+  skyClouds.forEach(drawCloud);
+
+  if (skyDoor) {
+    const pulse = 1 + Math.sin(worldTime * 5) * 0.06;
+    ctx.save();
+    ctx.translate(skyDoor.x, skyDoor.y);
+    ctx.scale(pulse * skyDoor.scale, pulse * skyDoor.scale);
+    ctx.shadowColor = "#ffe77a";
+    ctx.shadowBlur = 28;
+    ctx.fillStyle = "#6b3e9d";
+    ctx.strokeStyle = "#ffd85c";
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.roundRect(-48, -72, 96, 144, 45);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffe77a";
+    ctx.beginPath();
+    ctx.arc(28, 2, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawSkyPlayer();
+  ctx.fillStyle = "rgb(255 255 255 / 82%)";
+  roundedRect(18, 15, 305, 47, 18);
+  ctx.fillStyle = "#4a3269";
+  ctx.font = "900 20px Trebuchet MS";
+  ctx.fillText(`Cloud searches: ${cloudChecks}/2`, 34, 46);
+}
+
 function drawBonus() {
   if (!currentBonus) return;
   const isMegaTail = currentBonus.type === "mega-tail";
+  const isCoinPower = currentBonus.type === "coins";
   if (isMegaTail && (!megaTailIcon.complete || !megaTailIcon.naturalWidth)) return;
-  if (!isMegaTail && (!bonusIcons.complete || !bonusIcons.naturalWidth)) return;
+  if (!isMegaTail && !isCoinPower && (!bonusIcons.complete || !bonusIcons.naturalWidth)) return;
   const depthScale = 0.38 + pathDepth(currentBonus.y) * 0.8;
   const size = 88 * depthScale;
   const y = currentBonus.y - 72 + Math.sin(currentBonus.age * 3.2) * 19;
@@ -901,7 +1968,9 @@ function drawBonus() {
     ? { fill: "rgb(255 226 75 / 28%)", stroke: "#fff06a" }
     : currentBonus.type === "invisible"
       ? { fill: "rgb(90 198 255 / 28%)", stroke: "#8ee7ff" }
-      : { fill: "rgb(190 92 255 / 30%)", stroke: "#e5a2ff" };
+      : isCoinPower
+        ? { fill: "rgb(255 199 36 / 35%)", stroke: "#fff28a" }
+        : { fill: "rgb(190 92 255 / 30%)", stroke: "#e5a2ff" };
 
   ctx.fillStyle = colors.fill;
   ctx.beginPath();
@@ -914,6 +1983,23 @@ function drawBonus() {
   ctx.stroke();
   if (isMegaTail) {
     ctx.drawImage(megaTailIcon, currentBonus.x - size / 2, y - size / 2, size, size);
+  } else if (isCoinPower) {
+    ctx.save();
+    ctx.shadowColor = "#ffcf33";
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = "#ffd447";
+    ctx.strokeStyle = "#b86d00";
+    ctx.lineWidth = Math.max(3, size * 0.07);
+    ctx.beginPath();
+    ctx.arc(currentBonus.x, y, size * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff49b";
+    ctx.font = `900 ${Math.max(18, size * 0.42)}px Trebuchet MS`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("50", currentBonus.x, y + 1);
+    ctx.restore();
   } else {
     const sourceWidth = bonusIcons.naturalWidth / 2;
     const sourceHeight = bonusIcons.naturalHeight;
@@ -961,7 +2047,9 @@ function drawFruits() {
     ctx.beginPath();
     ctx.ellipse(fruit.x, fruit.y + 23, fruit.radius, 12, 0, 0, Math.PI * 2);
     ctx.fill();
-    drawSprite(fruit.sprite, fruit.x, fruit.y - 3, fruit.radius * 2.3 * depthScale);
+    // Draw collectibles a little smaller than their game space so their edges
+    // have plenty of clear room and never look crowded or clipped.
+    drawSprite(fruit.sprite, fruit.x, fruit.y - 3, fruit.radius * 1.95 * depthScale);
   }
 }
 
@@ -1006,7 +2094,7 @@ function drawToys() {
     ctx.ellipse(toy.x, toy.y + toy.radius * 0.7, toy.radius, toy.radius * 0.28, 0, 0, Math.PI * 2);
     ctx.fill();
     const groundLift = toy.radius * 0.48 * depthScale;
-    drawSprite(toy.sprite, toy.x, toy.y - groundLift, toy.radius * 2.55 * depthScale);
+    drawSprite(toy.sprite, toy.x, toy.y - groundLift, toy.radius * 2.15 * depthScale);
   }
 }
 
@@ -1046,6 +2134,7 @@ function drawBoss() {
 }
 
 function drawPlayer() {
+  drawPlatyTrail(player.x, player.y - player.jumpHeight + player.radius * 0.4, 0.95);
   const shadowScale = Math.max(0.45, 1 - player.jumpHeight / 90);
   ctx.fillStyle = "rgb(45 31 58 / 22%)";
   ctx.beginPath();
@@ -1064,6 +2153,7 @@ function drawPlayer() {
     ctx.save();
     ctx.translate(player.x, player.y - player.jumpHeight);
     ctx.scale(1, squish);
+    ctx.filter = platyColorFilter();
     ctx.drawImage(
       platyTailAnimation,
       frameNumber * sourceWidth, 0, sourceWidth, sourceHeight,
@@ -1073,11 +2163,18 @@ function drawPlayer() {
   } else if (platyBack.complete && platyBack.naturalWidth) {
     const size = player.radius * 3.05;
     const ratio = platyBack.naturalHeight / platyBack.naturalWidth;
+    ctx.save();
+    ctx.filter = platyColorFilter();
     ctx.drawImage(platyBack, player.x - size / 2, player.y - player.jumpHeight - size * ratio / 2, size, size * ratio);
+    ctx.restore();
   } else {
+    ctx.save();
+    ctx.filter = platyColorFilter();
     drawSprite(SPRITE.platy, player.x, player.y - player.jumpHeight, player.radius * 2.65, ctx.globalAlpha);
+    ctx.restore();
   }
   ctx.globalAlpha = 1;
+  drawPlatyHat(player.x, player.y - player.jumpHeight - player.radius * 1.5, player.radius * 1.55);
 
   if (isPlatyReady()) {
     ctx.fillStyle = "#fff8a8";
@@ -1100,15 +2197,21 @@ function drawTailCollections() {
     const x = player.x + spread;
     const y = player.y - player.jumpHeight + player.radius * 0.55 + bob;
     const size = (collected.small ? 30 : 39) * (0.65 + settle * 0.35);
-    drawSprite(collected.sprite, x, y, size, fade);
+    drawSprite(collected.sprite, x, y, size * 0.88, fade);
   });
 }
 
 function draw() {
   ctx.save();
+  if (state === "sky" || state === "shop") {
+    drawSky();
+    ctx.restore();
+    return;
+  }
   if (earthquake > 0) ctx.translate(random(-5, 5), random(-5, 5));
   drawBackground();
   drawCracks();
+  drawRunningCoins();
   drawFruits();
   drawToys();
   drawBonus();
@@ -1123,16 +2226,36 @@ function gameLoop(time) {
   const dt = Math.min(0.035, (time - lastTime) / 1000 || 0);
   lastTime = time;
   if (state === "playing") update(dt);
+  if (state === "sky") updateSky(dt);
   if (state === "boss-bounce" || state === "crushed") updateOutcome(dt);
   draw();
   requestAnimationFrame(gameLoop);
+}
+
+function handleUpPress() {
+  if (state === "playing") {
+    jump();
+    return;
+  }
+  if (state === "sky") {
+    triggerSkyBoost();
+    return;
+  }
+  if (state === "sky-wait") {
+    const now = performance.now();
+    if (now - lastUpTap < 430) startSkyPhase();
+    else {
+      lastUpTap = now;
+      showNotice("Tap UP one more time to fly!", "ready", 1200);
+    }
+  }
 }
 
 window.addEventListener("keydown", (event) => {
   if (event.key.startsWith("Arrow")) {
     event.preventDefault();
     keys.add(event.key);
-    if (event.key === "ArrowUp" && !event.repeat) jump();
+    if (event.key === "ArrowUp" && !event.repeat) handleUpPress();
   }
 });
 
@@ -1144,7 +2267,7 @@ document.querySelectorAll("[data-key]").forEach((button) => {
   const press = (event) => {
     event.preventDefault();
     keys.add(key);
-    if (key === "ArrowUp") jump();
+    if (key === "ArrowUp") handleUpPress();
   };
   const release = (event) => { event.preventDefault(); keys.delete(key); };
   button.addEventListener("pointerdown", press);
@@ -1155,6 +2278,9 @@ document.querySelectorAll("[data-key]").forEach((button) => {
 
 screenButton.onclick = startNewGame;
 instructionsButton.addEventListener("click", showInstructions);
+stableButton.addEventListener("click", () => showStable(stableReturnAction || showHomeScreen));
+customizeButton.addEventListener("click", showCustomize);
+homeButton.addEventListener("click", returnHomeFromShop);
 soundToggle.addEventListener("click", () => {
   const muted = audio.toggle();
   soundToggle.textContent = muted ? "🔇 Sound Off" : "🔊 Sound On";
@@ -1163,4 +2289,7 @@ soundToggle.addEventListener("click", () => {
 chooseSetting();
 buildLevel();
 state = "title";
+stableReturnAction = showHomeScreen;
+showHomeScreen();
+savePlayerData();
 requestAnimationFrame(gameLoop);

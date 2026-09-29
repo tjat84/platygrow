@@ -17,6 +17,7 @@
         <div class="header-tools">
           <div class="stats" aria-label="Game information">
             <div><span>Score</span><strong id="score">0</strong></div>
+            <div><span>Coins</span><strong id="coins">0</strong></div>
             <div><span>Level</span><strong id="level">1</strong></div>
             <div><span>Piggy Master</span><strong id="boss-timer">20s</strong></div>
             <div><span>Bonus</span><strong id="bonus-status">—</strong></div>
@@ -37,10 +38,26 @@
               Platy travels along the path automatically. Turn with the left and right arrows,
               press the up arrow to jump, and scoop up stuffies from the trail with her tail!
             </p>
+            <div class="account-panel" id="account-panel">
+              <p>Game accounts</p>
+              <div class="account-list" id="account-list" aria-label="Choose a game account"></div>
+            </div>
+            <div class="stable-panel hidden" id="stable-panel"></div>
+            <div class="shop-panel hidden" id="shop-panel"></div>
+            <div class="customize-panel hidden" id="customize-panel"></div>
             <div class="screen-actions">
               <button id="screen-button" type="button">Start Game</button>
               <button class="paper-button" id="instructions-button" type="button" aria-label="Open game instructions">
                 <span aria-hidden="true">📄</span> Instructions
+              </button>
+              <button class="paper-button" id="stable-button" type="button" aria-label="Open pet stable">
+                <span aria-hidden="true">🏠</span> Pet Stable
+              </button>
+              <button class="paper-button" id="customize-button" type="button" aria-label="Customize Platy">
+                <span aria-hidden="true">🌈</span> Customize Platy
+              </button>
+              <button class="paper-button hidden" id="home-button" type="button" aria-label="Return to the home screen">
+                <span aria-hidden="true">🏡</span> Home
               </button>
             </div>
           </div>
